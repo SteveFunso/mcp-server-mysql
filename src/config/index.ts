@@ -37,6 +37,9 @@ export const IS_REMOTE_MCP = process.env.IS_REMOTE_MCP === "true";
 export const REMOTE_SECRET_KEY = process.env.REMOTE_SECRET_KEY || "";
 export const PORT = process.env.PORT || 3000;
 
+// Security configuration
+export const MYSQL_MAX_QUERY_COMPLEXITY = Number(process.env.MYSQL_MAX_QUERY_COMPLEXITY) || 1000;
+
 // Check if we're in multi-DB mode (no specific DB set)
 export const isMultiDbMode =
   !process.env.MYSQL_DB || process.env.MYSQL_DB.trim() === "";
@@ -58,14 +61,9 @@ export const mcpConfig = {
           port: Number(process.env.MYSQL_PORT || "3306"),
         }),
     user: process.env.MYSQL_USER || "root",
-    password:
-      process.env.MYSQL_PASS === undefined ? "" : process.env.MYSQL_PASS,
+    password: process.env.MYSQL_PASS,
     database: process.env.MYSQL_DB || undefined, // Allow undefined database for multi-DB mode
     connectionLimit: 10,
-    authPlugins: {
-      mysql_clear_password: () => () =>
-        Buffer.from(process.env.MYSQL_PASS || "root"),
-    },
     ...(process.env.MYSQL_SSL === "true"
       ? {
           ssl: {
