@@ -1,5 +1,5 @@
 import { performance } from "perf_hooks";
-import { isMultiDbMode } from "./../config/index.js";
+import { isMultiDbMode, MYSQL_MAX_QUERY_COMPLEXITY } from "./../config/index.js";
 
 import {
   isDDLAllowedForSchema,
@@ -7,7 +7,7 @@ import {
   isUpdateAllowedForSchema,
   isDeleteAllowedForSchema,
 } from "./permissions.js";
-import { extractSchemaFromQuery, getQueryTypes } from "./utils.js";
+import { getAllSchemasFromQuery, getQueryTypes, getAST, calculateComplexity } from "./utils.js";
 
 import * as mysql2 from "mysql2/promise";
 import { log } from "./../utils/index.js";
@@ -67,280 +67,115 @@ async function executeQuery<T>(sql: string, params: string[] = []): Promise<T> {
   }
 }
 
-// @INFO: New function to handle write operations
-async function executeWriteQuery<T>(sql: string): Promise<T> {
+async function executeVerifiedQuery<T>(sql: string, params: (string | number)[]): Promise<T> {
   let connection;
   try {
     const pool = await getPool();
     connection = await pool.getConnection();
-    log("error", "Write connection acquired");
+    log("info", "Connection acquired for verified query");
 
-    // Extract schema for permissions (if needed)
-    const schema = extractSchemaFromQuery(sql);
+    // Parse the query once to get the AST
+    const ast = getAST(sql);
 
-    // @INFO: Begin transaction for write operation
+    // Check query complexity to prevent DoS attacks
+    const complexity = calculateComplexity(ast);
+    if (complexity > MYSQL_MAX_QUERY_COMPLEXITY) {
+        throw new Error(`Query is too complex to execute (complexity: ${complexity}, max: ${MYSQL_MAX_QUERY_COMPLEXITY}). Please simplify the query.`);
+    }
+
+    // Check the type of query
+    const queryTypes = await getQueryTypes(ast);
+    const schemas = getAllSchemasFromQuery(sql, ast);
+
+    const isUpdateOperation = queryTypes.some((type) => ["update"].includes(type));
+    const isInsertOperation = queryTypes.some((type) => ["insert"].includes(type));
+    const isDeleteOperation = queryTypes.some((type) => ["delete"].includes(type));
+    const isDDLOperation = queryTypes.some((type) => ["create", "alter", "drop", "truncate"].includes(type));
+    const isWriteOperation = isUpdateOperation || isInsertOperation || isDeleteOperation || isDDLOperation;
+
+    // Check schema-specific permissions for write operations for ALL schemas involved
+    for (const schema of schemas) {
+      if (isInsertOperation && !isInsertAllowedForSchema(schema)) {
+        throw new Error(`INSERT operations are not allowed for schema '${schema || "default"}'.`);
+      }
+      if (isUpdateOperation && !isUpdateAllowedForSchema(schema)) {
+        throw new Error(`UPDATE operations are not allowed for schema '${schema || "default"}'.`);
+      }
+      if (isDeleteOperation && !isDeleteAllowedForSchema(schema)) {
+        throw new Error(`DELETE operations are not allowed for schema '${schema || "default"}'.`);
+      }
+      if (isDDLOperation && !isDDLAllowedForSchema(schema)) {
+        throw new Error(`DDL operations are not allowed for schema '${schema || "default"}'.`);
+      }
+    }
+
     await connection.beginTransaction();
 
     try {
-      // @INFO: Execute the write query
       const startTime = performance.now();
-      const result = await connection.query(sql);
+      // ALWAYS use parameterized queries to prevent SQL injection
+      const [result] = await connection.query(sql, params);
       const endTime = performance.now();
       const duration = endTime - startTime;
-      const response = Array.isArray(result) ? result[0] : result;
 
-      // @INFO: Commit the transaction
       await connection.commit();
 
-      // @INFO: Format the response based on operation type
-      let responseText;
+      let responseText = JSON.stringify(result, null, 2);
 
-      // Check the type of query
-      const queryTypes = await getQueryTypes(sql);
-      const isUpdateOperation = queryTypes.some((type) =>
-        ["update"].includes(type),
-      );
-      const isInsertOperation = queryTypes.some((type) =>
-        ["insert"].includes(type),
-      );
-      const isDeleteOperation = queryTypes.some((type) =>
-        ["delete"].includes(type),
-      );
-      const isDDLOperation = queryTypes.some((type) =>
-        ["create", "alter", "drop", "truncate"].includes(type),
-      );
-
-      // @INFO: Type assertion for ResultSetHeader which has affectedRows, insertId, etc.
-      if (isInsertOperation) {
-        const resultHeader = response as mysql2.ResultSetHeader;
-        responseText = `Insert successful on schema '${schema || "default"}'. Affected rows: ${resultHeader.affectedRows}, Last insert ID: ${resultHeader.insertId}`;
-      } else if (isUpdateOperation) {
-        const resultHeader = response as mysql2.ResultSetHeader;
-        responseText = `Update successful on schema '${schema || "default"}'. Affected rows: ${resultHeader.affectedRows}, Changed rows: ${resultHeader.changedRows || 0}`;
-      } else if (isDeleteOperation) {
-        const resultHeader = response as mysql2.ResultSetHeader;
-        responseText = `Delete successful on schema '${schema || "default"}'. Affected rows: ${resultHeader.affectedRows}`;
-      } else if (isDDLOperation) {
-        responseText = `DDL operation successful on schema '${schema || "default"}'.`;
-      } else {
-        responseText = JSON.stringify(response, null, 2);
+      if (isWriteOperation) {
+        const resultHeader = result as mysql2.ResultSetHeader;
+        if (isInsertOperation) {
+          responseText = `Insert successful on the relevant schema(s). Affected rows: ${resultHeader.affectedRows}, Last insert ID: ${resultHeader.insertId}`;
+        } else if (isUpdateOperation) {
+          responseText = `Update successful on the relevant schema(s). Affected rows: ${resultHeader.affectedRows}, Changed rows: ${resultHeader.changedRows || 0}`;
+        } else if (isDeleteOperation) {
+          responseText = `Delete successful on the relevant schema(s). Affected rows: ${resultHeader.affectedRows}`;
+        } else if (isDDLOperation) {
+          responseText = `DDL operation successful on the relevant schema(s).`;
+        }
       }
 
       return {
         content: [
-          {
-            type: "text",
-            text: responseText,
-          },
-          {
-            type: "text",
-            text: `Query execution time: ${duration.toFixed(2)} ms`,
-          },
+          { type: "text", text: responseText },
+          { type: "text", text: `Query execution time: ${duration.toFixed(2)} ms` },
         ],
         isError: false,
       } as T;
     } catch (error: unknown) {
-      // @INFO: Rollback on error
-      log("error", "Error executing write query:", error);
       await connection.rollback();
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error executing write operation: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      } as T;
+      throw error; // Rethrow to be caught by the outer catch block
     }
   } catch (error: unknown) {
-    log("error", "Error in write operation transaction:", error);
+    const isSafeError = error instanceof Error && (
+        error.message.includes("not allowed for schema") ||
+        error.message.includes("Query is too complex")
+    );
+    const message = error instanceof Error ? error.message : String(error);
+    log("error", "Error in executeVerifiedQuery:", message);
+
+    // In debug mode, or if it's a "safe" permission/complexity error, show the real message.
+    // Otherwise, show a generic message.
+    const returnedMessage = process.env.DEBUG === 'true' || isSafeError ? message : "An internal server error occurred.";
+
     return {
-      content: [
-        {
-          type: "text",
-          text: `Database connection error: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
+      content: [{ type: "text", text: `Error: ${returnedMessage}` }],
       isError: true,
     } as T;
   } finally {
     if (connection) {
       connection.release();
-      log("error", "Write connection released");
+      log("info", "Connection released");
     }
   }
 }
 
-async function executeReadOnlyQuery<T>(sql: string): Promise<T> {
-  let connection;
-  try {
-    // Check the type of query
-    const queryTypes = await getQueryTypes(sql);
-
-    // Get schema for permission checking
-    const schema = extractSchemaFromQuery(sql);
-
-    const isUpdateOperation = queryTypes.some((type) =>
-      ["update"].includes(type),
-    );
-    const isInsertOperation = queryTypes.some((type) =>
-      ["insert"].includes(type),
-    );
-    const isDeleteOperation = queryTypes.some((type) =>
-      ["delete"].includes(type),
-    );
-    const isDDLOperation = queryTypes.some((type) =>
-      ["create", "alter", "drop", "truncate"].includes(type),
-    );
-
-    // Check schema-specific permissions
-    if (isInsertOperation && !isInsertAllowedForSchema(schema)) {
-      log(
-        "error",
-        `INSERT operations are not allowed for schema '${schema || "default"}'. Configure SCHEMA_INSERT_PERMISSIONS.`,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: INSERT operations are not allowed for schema '${schema || "default"}'. Ask the administrator to update SCHEMA_INSERT_PERMISSIONS.`,
-          },
-        ],
-        isError: true,
-      } as T;
-    }
-
-    if (isUpdateOperation && !isUpdateAllowedForSchema(schema)) {
-      log(
-        "error",
-        `UPDATE operations are not allowed for schema '${schema || "default"}'. Configure SCHEMA_UPDATE_PERMISSIONS.`,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: UPDATE operations are not allowed for schema '${schema || "default"}'. Ask the administrator to update SCHEMA_UPDATE_PERMISSIONS.`,
-          },
-        ],
-        isError: true,
-      } as T;
-    }
-
-    if (isDeleteOperation && !isDeleteAllowedForSchema(schema)) {
-      log(
-        "error",
-        `DELETE operations are not allowed for schema '${schema || "default"}'. Configure SCHEMA_DELETE_PERMISSIONS.`,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: DELETE operations are not allowed for schema '${schema || "default"}'. Ask the administrator to update SCHEMA_DELETE_PERMISSIONS.`,
-          },
-        ],
-        isError: true,
-      } as T;
-    }
-
-    if (isDDLOperation && !isDDLAllowedForSchema(schema)) {
-      log(
-        "error",
-        `DDL operations are not allowed for schema '${schema || "default"}'. Configure SCHEMA_DDL_PERMISSIONS.`,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: DDL operations are not allowed for schema '${schema || "default"}'. Ask the administrator to update SCHEMA_DDL_PERMISSIONS.`,
-          },
-        ],
-        isError: true,
-      } as T;
-    }
-
-    // For write operations that are allowed, use executeWriteQuery
-    if (
-      (isInsertOperation && isInsertAllowedForSchema(schema)) ||
-      (isUpdateOperation && isUpdateAllowedForSchema(schema)) ||
-      (isDeleteOperation && isDeleteAllowedForSchema(schema)) ||
-      (isDDLOperation && isDDLAllowedForSchema(schema))
-    ) {
-      return executeWriteQuery(sql);
-    }
-
-    // For read-only operations, continue with the original logic
-    const pool = await getPool();
-    connection = await pool.getConnection();
-    log("error", "Read-only connection acquired");
-
-    // Set read-only mode
-    await connection.query("SET SESSION TRANSACTION READ ONLY");
-
-    // Begin transaction
-    await connection.beginTransaction();
-
-    try {
-      // Execute query - in multi-DB mode, we may need to handle USE statements specially
-      const startTime = performance.now();
-      const result = await connection.query(sql);
-      const endTime = performance.now();
-      const duration = endTime - startTime;
-      const rows = Array.isArray(result) ? result[0] : result;
-
-      // Rollback transaction (since it's read-only)
-      await connection.rollback();
-
-      // Reset to read-write mode
-      await connection.query("SET SESSION TRANSACTION READ WRITE");
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(rows, null, 2),
-          },
-          {
-            type: "text",
-            text: `Query execution time: ${duration.toFixed(2)} ms`,
-          },
-        ],
-        isError: false,
-      } as T;
-    } catch (error) {
-      // Rollback transaction on query error
-      log("error", "Error executing read-only query:", error);
-      await connection.rollback();
-      throw error;
-    }
-  } catch (error) {
-    // Ensure we rollback and reset transaction mode on any error
-    log("error", "Error in read-only query transaction:", error);
-    try {
-      if (connection) {
-        await connection.rollback();
-        await connection.query("SET SESSION TRANSACTION READ WRITE");
-      }
-    } catch (cleanupError) {
-      // Ignore errors during cleanup
-      log("error", "Error during cleanup:", cleanupError);
-    }
-    throw error;
-  } finally {
-    if (connection) {
-      connection.release();
-      log("error", "Read-only connection released");
-    }
-  }
-}
 
 export {
   isTestEnvironment,
   safeExit,
   executeQuery,
   getPool,
-  executeWriteQuery,
-  executeReadOnlyQuery,
+  executeVerifiedQuery,
   poolPromise,
 };

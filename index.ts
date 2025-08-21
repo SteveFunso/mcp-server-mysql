@@ -32,13 +32,15 @@ import {
   safeExit,
   getPool,
   executeQuery,
-  executeReadOnlyQuery,
+  executeVerifiedQuery,
   poolPromise,
 } from "./src/db/index.js";
 
 import path from 'path';
 import express, { Request, Response } from "express";
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
+import helmet from 'helmet';
 
 
 log("info", `Starting MySQL MCP server v${version}...`);
@@ -149,10 +151,17 @@ export default function createMcpServer({
               properties: {
                 sql: {
                   type: "string",
-                  description: "The SQL query to execute",
+                  description: "The SQL query to execute, with '?' as placeholders for parameters.",
                 },
+                params: {
+                  type: "array",
+                  description: "An array of parameters to bind to the placeholders in the SQL query.",
+                  items: {
+                    type: "string",
+                  }
+                }
               },
-              required: ["sql"],
+              required: ["sql", "params"],
             },
           },
         },
@@ -190,7 +199,7 @@ export default function createMcpServer({
         table_schema, table_name
     `;
 
-      const queryResult = (await executeReadOnlyQuery<any>(tablesQuery));
+      const queryResult = (await executeVerifiedQuery<any>(tablesQuery, []));
       const tables = JSON.parse(queryResult.content[0].text) as TableRow[];
       log("info", `Found ${tables.length} tables`);
 
@@ -273,15 +282,18 @@ export default function createMcpServer({
         throw new Error(`Unknown tool: ${request.params.name}`);
       }
 
-      const sql = request.params.arguments?.sql as string;
-      return await executeReadOnlyQuery(sql);
+      const { sql, params } = request.params.arguments as { sql: string, params: string[] };
+      // This will be the new, secure function that uses parameterized queries.
+      // I will implement it in `src/db/index.ts` next.
+      return await executeVerifiedQuery(sql, params);
     } catch (err) {
       const error = err as Error;
       log("error", "Error in CallToolRequest handler:", error);
+      const message = process.env.DEBUG === 'true' ? error.message : "An internal error occurred while processing the tool call.";
       return {
         content: [{
           type: "text",
-          text: `Error: ${error.message}`
+          text: `Error: ${message}`
         }],
         isError: true
       };
@@ -302,10 +314,17 @@ export default function createMcpServer({
             properties: {
               sql: {
                 type: "string",
-                description: "The SQL query to execute",
+                description: "The SQL query to execute, with '?' as placeholders for parameters.",
               },
+              params: {
+                type: "array",
+                description: "An array of parameters to bind to the placeholders in the SQL query.",
+                items: {
+                  type: "string",
+                }
+              }
             },
-            required: ["sql"],
+            required: ["sql", "params"],
           },
         },
       ],
@@ -414,22 +433,38 @@ const isMainModule = () => {
 if (isMainModule()) {
   log("info", "Running in standalone mode");
 
+  if (IS_REMOTE_MCP && !REMOTE_SECRET_KEY) {
+    log("error", "FATAL: Server is configured for remote mode (IS_REMOTE_MCP=true) but no REMOTE_SECRET_KEY is provided.");
+    safeExit(1);
+  }
+
   // Start the server
   (async () => {
     try {
       const mcpServer = createMcpServer({ config: { debug: false } });
       if (IS_REMOTE_MCP && REMOTE_SECRET_KEY?.length) {
         const app = express();
+        app.use(helmet());
         app.use(express.json());
         app.post("/mcp", async (req: Request, res: Response) => {
           // In stateless mode, create a new instance of transport and server for each request
           // to ensure complete isolation. A single instance would cause request ID collisions
           // when multiple clients connect concurrently.
-          if (
-            !req.get("Authorization") ||
-            !req.get("Authorization")?.startsWith("Bearer ") ||
-            !req.get("Authorization")?.endsWith(REMOTE_SECRET_KEY)
-          ) {
+          const authHeader = req.get("Authorization");
+          let providedToken = "";
+
+          if (authHeader && authHeader.startsWith("Bearer ")) {
+            providedToken = authHeader.substring(7);
+          }
+
+          try {
+            const secretBuffer = Buffer.from(REMOTE_SECRET_KEY, 'utf8');
+            const providedTokenBuffer = Buffer.from(providedToken, 'utf8');
+
+            if (secretBuffer.length !== providedTokenBuffer.length || !crypto.timingSafeEqual(secretBuffer, providedTokenBuffer)) {
+              throw new Error("Invalid token");
+            }
+          } catch {
             console.error("Missing or invalid Authorization header");
             res.status(401).json({
               jsonrpc: "2.0",
