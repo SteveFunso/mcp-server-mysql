@@ -1,9 +1,12 @@
 {
-  "name": "@benborla29/mcp-server-mysql",
-  "version": "2.0.5",
+  "name": "@praise25/mcp-server-mysql",
+  "version": "1.0.1",
   "description": "MCP server for interacting with MySQL databases based on Node",
   "license": "MIT",
-  "author": "Ben Borla (https://github.com/benborla)",
+  "author": "SteveFunso",
+  "repository": {
+    "url": "https://github.com/SteveFunso/mcp-server-mysql.git"
+  },
   "type": "module",
   "main": "dist/index.js",
   "module": "index.ts",

@@ -29,13 +29,13 @@ A Model Context Protocol server that provides access to MySQL databases. This se
 
 ## Installation
 
-There are several ways to install and configure the MCP server but the most common would be checking this website https://smithery.ai/server/@benborla29/mcp-server-mysql
+There are several ways to install and configure the MCP server but the most common would be checking this website https://smithery.ai/server/@praise25/mcp-server-mysql
 
 ### Cursor
 
 For Cursor IDE, you can install this MCP server with the following command in your project:
 
-1. Visit https://smithery.ai/server/@benborla29/mcp-server-mysql
+1. Visit https://smithery.ai/server/@praise25/mcp-server-mysql
 2. Follow the instruction for Cursor
 
 
@@ -60,10 +60,10 @@ This will show an interactive dialog where you can select your `mcp_server_mysql
 First, install the package globally:
 ```bash
 # Using npm
-npm install -g @benborla29/mcp-server-mysql
+npm install -g @praise25/mcp-server-mysql
 
 # Using pnpm
-pnpm add -g @benborla29/mcp-server-mysql
+pnpm add -g @praise25/mcp-server-mysql
 ```
 
 Then add the server to Claude Code:
@@ -77,7 +77,7 @@ claude mcp add mcp_server_mysql \
   -e ALLOW_INSERT_OPERATION="false" \
   -e ALLOW_UPDATE_OPERATION="false" \
   -e ALLOW_DELETE_OPERATION="false" \
-  -- npx @benborla29/mcp-server-mysql
+  -- npx @praise25/mcp-server-mysql
 ```
 
 **Using Local Repository (for development):**
@@ -115,7 +115,7 @@ claude mcp add mcp_server_mysql \
   -e ALLOW_INSERT_OPERATION="false" \
   -e ALLOW_UPDATE_OPERATION="false" \
   -e ALLOW_DELETE_OPERATION="false" \
-  -- npx @benborla29/mcp-server-mysql
+  -- npx @praise25/mcp-server-mysql
 ```
 
 #### Choosing the Right Scope
@@ -161,7 +161,7 @@ claude mcp add mcp_server_mysql_multi \
   -e MYSQL_USER="root" \
   -e MYSQL_PASS="your_password" \
   -e MULTI_DB_WRITE_MODE="false" \
-  -- npx @benborla29/mcp-server-mysql
+  -- npx @praise25/mcp-server-mysql
 ```
 
 #### Advanced Configuration
@@ -184,7 +184,7 @@ claude mcp add mcp_server_mysql \
   -e ALLOW_UPDATE_OPERATION="false" \
   -e ALLOW_DELETE_OPERATION="false" \
   -e MYSQL_ENABLE_LOGGING="true" \
-  -- npx @benborla29/mcp-server-mysql
+  -- npx @praise25/mcp-server-mysql
 ```
 
 #### Troubleshooting Claude Code Setup
@@ -208,7 +208,7 @@ claude mcp add mcp_server_mysql \
 4. **Server Not Starting**: Check Claude Code logs or run the server directly to debug:
    ```bash
    # Test the server directly
-   npx @benborla29/mcp-server-mysql
+   npx @praise25/mcp-server-mysql
    ```
 
 ### Using NPM/PNPM
@@ -217,10 +217,10 @@ For manual installation:
 
 ```bash
 # Using npm
-npm install -g @benborla29/mcp-server-mysql
+npm install -g @praise25/mcp-server-mysql
 
 # Using pnpm
-pnpm add -g @benborla29/mcp-server-mysql
+pnpm add -g @praise25/mcp-server-mysql
 ```
 
 After manual installation, you'll need to configure your LLM application to use the MCP server (see Configuration section below).
@@ -231,7 +231,7 @@ If you want to clone and run this MCP server directly from the source code, foll
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/benborla/mcp-server-mysql.git
+   git clone https://github.com/SteveFunso/mcp-server-mysql.git
    cd mcp-server-mysql
    ```
 
@@ -293,13 +293,13 @@ If you want to clone and run this MCP server directly from the source code, foll
 
 ### Run in remote mode
 
-To run in remote mode, you'll need to provide [environment variables](https://github.com/benborla/mcp-server-mysql?tab=readme-ov-file#environment-variables) to the npx script. 
+To run in remote mode, you'll need to provide [environment variables](https://github.com/SteveFunso/mcp-server-mysql?tab=readme-ov-file#environment-variables) to the npx script.
 1. Create env file in preferred directory
    ```bash
    # create .env file
    touch .env
    ```
-2. Copy-paste [example file](https://github.com/benborla/mcp-server-mysql/blob/main/.env) from this repository
+2. Copy-paste [example file](https://github.com/SteveFunso/mcp-server-mysql/blob/main/.env) from this repository
 3. Set the MySQL credentials to match your environment
 4. Set `IS_REMOTE_MCP=true`
 5. Set `REMOTE_SECRET_KEY` to a secure string.
@@ -310,7 +310,7 @@ To run in remote mode, you'll need to provide [environment variables](https://gi
    ```
 8. Run the server
    ```bash
-   npx @benborla29/mcp-server-mysql
+   npx @praise25/mcp-server-mysql
    ```
 9. Configure your agent to connect to the MCP with the next configuration:
 ```json
@@ -388,7 +388,7 @@ The server provides comprehensive database information:
 If you installed using Smithery, your configuration is already set up. You can view or modify it with:
 
 ```bash
-smithery configure @benborla29/mcp-server-mysql
+smithery configure @praise25/mcp-server-mysql
 ```
 
 When reconfiguring, you can update any of the MySQL connection details as well as the write operation settings:
@@ -414,7 +414,7 @@ For more control over the MCP server's behavior, you can use these advanced conf
       "command": "/path/to/npx/binary/npx",
       "args": [
         "-y",
-        "@benborla29/mcp-server-mysql"
+        "@praise25/mcp-server-mysql"
       ],
       "env": {
         // Basic connection settings
@@ -684,18 +684,18 @@ echo "$(which node)/../../lib/node_modules"
 7. I am encountering `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'dotenv' imported from` error
 try this workaround:
 ```bash
-npx -y -p @benborla29/mcp-server-mysql -p dotenv mcp-server-mysql
+npx -y -p @praise25/mcp-server-mysql -p dotenv mcp-server-mysql
 ```
 Thanks to @lizhuangs
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request to
-https://github.com/benborla/mcp-server-mysql
+https://github.com/SteveFunso/mcp-server-mysql
 
 ## Many Thanks to the following Contributors:
-<a href = "https://github.com/benborla/mcp-server-mysql/graphs/contributors">
-  <img src = "https://contrib.rocks/image?repo=benborla/mcp-server-mysql"/>
+<a href = "https://github.com/SteveFunso/mcp-server-mysql/graphs/contributors">
+  <img src = "https://contrib.rocks/image?repo=SteveFunso/mcp-server-mysql"/>
 </a>
 
 ### Development Setup
