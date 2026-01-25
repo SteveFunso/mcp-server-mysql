@@ -41,6 +41,7 @@ import express, { Request, Response } from "express";
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import helmet from 'helmet';
+import fs from 'fs';
 
 
 log("info", `Starting MySQL MCP server v${version}...`);
@@ -420,8 +421,9 @@ const isMainModule = () => {
   if (typeof import.meta !== 'undefined' && import.meta.url && process.argv[1]) {
     // Convert the `import.meta.url` (e.g., 'file:///path/to/file.js') to a system-standard absolute path.
     const currentModulePath = fileURLToPath(import.meta.url);
-    // Resolve `process.argv[1]` (which can be a relative path) to a standard absolute path.
-    const mainScriptPath = path.resolve(process.argv[1]);
+    // Resolve `process.argv[1]` (which can be a relative path or symlink) to a standard absolute path.
+    // IMPORTANT: Use realpathSync to resolve symlinks (npm bin creates symlinks)
+    const mainScriptPath = fs.realpathSync(path.resolve(process.argv[1]));
     // Compare the two standardized absolute paths.
     return currentModulePath === mainScriptPath;
   }
