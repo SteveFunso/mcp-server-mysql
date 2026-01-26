@@ -156,9 +156,15 @@ export default function createMcpServer({
                 },
                 params: {
                   type: "array",
-                  description: "An array of parameters to bind to the placeholders in the SQL query.",
+                  description: "An array of parameters to bind to the placeholders in the SQL query. Can contain strings, numbers, or null values.",
                   items: {
-                    type: "string",
+                    oneOf: [
+                      { type: "string" },
+                      { type: "number" },
+                      { type: "integer" },
+                      { type: "boolean" },
+                      { type: "null" }
+                    ]
                   }
                 }
               },
@@ -283,14 +289,27 @@ export default function createMcpServer({
         throw new Error(`Unknown tool: ${request.params.name}`);
       }
 
-      const { sql, params } = request.params.arguments as { sql: string, params: string[] };
+      const { sql, params } = request.params.arguments as { sql: string, params: (string | number | boolean | null)[] };
       // This will be the new, secure function that uses parameterized queries.
       // I will implement it in `src/db/index.ts` next.
       return await executeVerifiedQuery(sql, params);
     } catch (err) {
       const error = err as Error;
       log("error", "Error in CallToolRequest handler:", error);
-      const message = process.env.DEBUG === 'true' ? error.message : "An internal error occurred while processing the tool call.";
+
+      // Safe errors that can be exposed to help the AI understand what went wrong
+      const isSafeError = error.message && (
+        error.message.includes("Unknown table") ||
+        error.message.includes("Unknown column") ||
+        error.message.includes("doesn't exist") ||
+        error.message.includes("syntax") ||
+        error.message.includes("SYNTAX") ||
+        /ER_[A-Z_]+/.test(error.message)
+      );
+
+      const message = process.env.DEBUG === 'true' || isSafeError
+        ? error.message
+        : "An internal error occurred while processing the tool call.";
       return {
         content: [{
           type: "text",
@@ -319,9 +338,15 @@ export default function createMcpServer({
               },
               params: {
                 type: "array",
-                description: "An array of parameters to bind to the placeholders in the SQL query.",
+                description: "An array of parameters to bind to the placeholders in the SQL query. Can contain strings, numbers, or null values.",
                 items: {
-                  type: "string",
+                  oneOf: [
+                    { type: "string" },
+                    { type: "number" },
+                    { type: "integer" },
+                    { type: "boolean" },
+                    { type: "null" }
+                  ]
                 }
               }
             },

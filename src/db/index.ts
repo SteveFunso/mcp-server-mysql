@@ -67,7 +67,7 @@ async function executeQuery<T>(sql: string, params: string[] = []): Promise<T> {
   }
 }
 
-async function executeVerifiedQuery<T>(sql: string, params: (string | number)[]): Promise<T> {
+async function executeVerifiedQuery<T>(sql: string, params: (string | number | boolean | null)[]): Promise<T> {
   let connection;
   try {
     const pool = await getPool();
@@ -147,14 +147,36 @@ async function executeVerifiedQuery<T>(sql: string, params: (string | number)[])
       throw error; // Rethrow to be caught by the outer catch block
     }
   } catch (error: unknown) {
-    const isSafeError = error instanceof Error && (
-        error.message.includes("not allowed for schema") ||
-        error.message.includes("Query is too complex")
-    );
     const message = error instanceof Error ? error.message : String(error);
     log("error", "Error in executeVerifiedQuery:", message);
 
-    // In debug mode, or if it's a "safe" permission/complexity error, show the real message.
+    // Determine if this is a "safe" error message to expose
+    // Safe errors include: permission errors, complexity errors, and common MySQL errors
+    // that help the AI understand what went wrong (table/column not found, syntax errors, etc.)
+    const isSafeError = error instanceof Error && (
+        // Permission and complexity errors
+        error.message.includes("not allowed for schema") ||
+        error.message.includes("Query is too complex") ||
+        // Common MySQL errors that are helpful for debugging
+        error.message.includes("Unknown table") ||
+        error.message.includes("Unknown column") ||
+        error.message.includes("Table") ||  // Catches "Table doesn't exist", etc.
+        error.message.includes("doesn't exist") ||
+        error.message.includes("Duplicate entry") ||
+        error.message.includes("syntax") ||
+        error.message.includes("SYNTAX") ||
+        error.message.includes("You have an error in your SQL") ||
+        error.message.includes("foreign key constraint") ||
+        error.message.includes("Data too long") ||
+        error.message.includes("Incorrect") ||  // Catches "Incorrect date value", etc.
+        error.message.includes("Out of range") ||
+        error.message.includes("cannot be null") ||
+        error.message.includes("Column count") ||
+        // MySQL error codes (ER_*)
+        /ER_[A-Z_]+/.test(error.message)
+    );
+
+    // In debug mode or for safe errors, show the real message.
     // Otherwise, show a generic message.
     const returnedMessage = process.env.DEBUG === 'true' || isSafeError ? message : "An internal server error occurred.";
 
